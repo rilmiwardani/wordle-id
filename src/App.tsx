@@ -485,7 +485,7 @@ export default function App() {
       </div>
 
       {/* Main Game Area */}
-      <div className="flex-1 flex flex-col relative w-full items-center">
+      <div className="flex flex-col relative w-full items-center">
         {/* Streak Display */}
         <div className="w-full max-w-md mx-auto mb-2 flex justify-center gap-4">
           <div className="flex bg-slate-800/50 rounded-full px-4 py-1.5 border border-slate-700/50 shadow-inner items-center gap-2">
