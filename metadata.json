@@ -1,0 +1,6 @@
+{
+  "name": "Wordle Bahasa Indonesia",
+  "description": "Game Wordle Bahasa Indonesia interaktif untuk TikTok Live. Penonton bisa melakukan vote tebakan di kolom komentar selama 30 detik pada masing-masing baris tebakan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,189 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-deep: #0f172a;
+  --color-tile-empty: #1e293b;
+  --color-tile-correct: #538d4e;
+  --color-tile-present: #b59f3b;
+  --color-tile-absent: #3a3a3c;
+  --color-accent-glow: rgba(59, 130, 246, 0.5);
+  --color-unwordle-green: rgba(83, 141, 78, 0.35);
+  --color-unwordle-yellow: rgba(181, 159, 59, 0.35);
+  --color-unwordle-gray: rgba(58, 58, 60, 0.35);
+  --color-unwordle-glow: rgba(168, 85, 247, 0.5);
+}
+
+@layer utilities {
+  @keyframes marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+  }
+  @keyframes shimmer {
+    0% { transform: translateX(-100%) scale(1.5) rotate(15deg); opacity: 0; }
+    50% { opacity: 0.5; }
+    100% { transform: translateX(100%) scale(1.5) rotate(15deg); opacity: 0; }
+  }
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}
+
+.wordle-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: 1rem;
+    box-sizing: border-box;
+    background-color: var(--color-bg-deep);
+    color: white;
+}
+.tile {
+    width: var(--tile-size, 80px);
+    height: var(--tile-size, 80px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: calc(var(--tile-size, 80px) * 0.65);
+    font-weight: 800;
+    border-radius: 8px;
+    text-transform: uppercase;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    text-shadow: 1px 2px 3px rgba(0, 0, 0, 0.6);
+    line-height: 1;
+}
+.active-row {
+    position: relative;
+    box-shadow: 0 0 20px var(--color-accent-glow);
+    border-radius: 12px;
+    background: rgba(59, 130, 246, 0.1);
+}
+.vote-badge {
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    vertical-align: middle;
+    margin-left: 8px;
+}
+
+/* ===== UnWordle Styles ===== */
+
+/* Mode Selector */
+.mode-selector {
+    display: flex;
+    gap: 4px;
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid rgba(71, 85, 105, 0.5);
+    border-radius: 12px;
+    padding: 4px;
+    backdrop-filter: blur(8px);
+}
+.mode-btn {
+    position: relative;
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.15em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    background: transparent;
+    z-index: 1;
+}
+.mode-btn-label {
+    position: relative;
+    z-index: 2;
+}
+.mode-btn-active {
+    color: white;
+}
+.mode-btn-inactive {
+    color: #64748b;
+}
+.mode-btn-inactive:hover {
+    color: #94a3b8;
+}
+.mode-btn-indicator {
+    position: absolute;
+    inset: 0;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(168, 85, 247, 0.4));
+    border: 1px solid rgba(139, 92, 246, 0.5);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+    z-index: 0;
+}
+
+/* UnWordle Grid */
+.unwordle-tile {
+    position: relative;
+    transition: border-color 0.3s ease;
+}
+
+/* Answer row (bottom row, all green) */
+.answer-row {
+    position: relative;
+    box-shadow: 0 0 20px rgba(83, 141, 78, 0.4);
+    border-radius: 12px;
+    background: rgba(83, 141, 78, 0.15);
+    margin-top: 4px;
+}
+
+/* Active row for UnWordle mode (purple glow) */
+.unwordle-active-row {
+    position: relative;
+    box-shadow: 0 0 20px var(--color-unwordle-glow);
+    border-radius: 12px;
+    background: rgba(168, 85, 247, 0.1);
+}
+
+/* Error triangle in corner of tile */
+.unwordle-error-triangle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 0 16px 16px 0;
+    border-color: transparent #ef4444 transparent transparent;
+    border-radius: 0 6px 0 0;
+}
+
+/* Constraint icon on empty tiles */
+.unwordle-constraint-icon {
+    font-size: calc(var(--tile-size, 80px) * 0.3);
+    opacity: 0.4;
+    color: rgba(255, 255, 255, 0.6);
+    pointer-events: none;
+}
+
+/* Constraint pattern display in VotingUI */
+.constraint-pattern {
+    display: inline-flex;
+    gap: 3px;
+    padding: 4px 10px;
+    background: rgba(30, 41, 59, 0.8);
+    border-radius: 8px;
+    border: 1px solid rgba(71, 85, 105, 0.5);
+}
+.constraint-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.constraint-dot-correct {
+    background: var(--color-tile-correct);
+}
+.constraint-dot-present {
+    background: var(--color-tile-present);
+}
+.constraint-dot-absent {
+    background: var(--color-tile-absent);
+}
