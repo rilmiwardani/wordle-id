@@ -401,6 +401,17 @@ export default function App() {
   };
 
   const handleModeChange = () => {
+    // Masuk mode fullscreen jika belum
+    try {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+          console.log(`Error attempting to enable fullscreen: ${err.message}`);
+        });
+      }
+    } catch (e) {
+      console.log('Fullscreen API not supported or blocked');
+    }
+
     if (gameMode === 'wordle') setGameMode('unwordle');
     else if (gameMode === 'unwordle') setGameMode('unwordle-hard');
     else setGameMode('wordle');
