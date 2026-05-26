@@ -43,7 +43,7 @@ export function UnwordleGrid({ puzzle, filledRows, currentRow, wordLength, faile
   return (
     <motion.div
       layout
-      className="flex-1 flex flex-col items-center justify-center gap-2 w-full"
+      className="flex flex-col items-center justify-center gap-2 w-full mt-2 mb-4"
       style={{ '--tile-size': `min(55px, calc((100vw - 40px - (${wordLength} - 1) * 8px) / ${wordLength}))` } as React.CSSProperties}
     >
       {/* Empty rows (0..4) */}

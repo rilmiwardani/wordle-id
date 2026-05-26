@@ -695,7 +695,7 @@ export default function App() {
       )}
       
       {/* BRANDING / STATUS */}
-      <div className="flex justify-between items-end mt-2 w-full">
+      <div className="flex justify-between items-end mt-auto pt-4 w-full">
           <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
               <span className="text-[10px] text-slate-500 uppercase font-mono">{isConnected ? 'IndoFinity Stream Connected' : 'Disconnected (Simulation Mode)'}</span>
