@@ -192,13 +192,17 @@ export default function App() {
         clearTimeout(timerRestart);
       };
     } else if (gameState === 'lost') {
+      const isUnwordle = gameMode.startsWith('unwordle');
+      const revealDelay = isUnwordle ? 6500 : 2500;
+      const restartDelay = isUnwordle ? 14000 : 10000;
+
       const timerReveal = window.setTimeout(() => {
         setShowOverlay(true);
-      }, 2500);
+      }, revealDelay);
 
       const timerRestart = window.setTimeout(() => {
         initGame();
-      }, 10000);
+      }, restartDelay);
       
       return () => {
         clearTimeout(timerReveal);
