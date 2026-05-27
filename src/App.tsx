@@ -6,7 +6,7 @@ import { useTikTokLive } from './hooks/useTikTokLive';
 import { Leaderboard } from './components/Leaderboard';
 import { Guess, Guesser, PlayerScore, GameMode, UnwordlePuzzle, UnwordleRow } from './types';
 import { getRandomWord, evaluateGuess } from './utils/gameLogic';
-import { generatePuzzle, validateWordAgainstPattern, getDeadLetters } from './utils/unwordleLogic';
+import { generatePuzzle, validateWordAgainstPattern, getDeadLetters, findValidWordsForPattern } from './utils/unwordleLogic';
 import { RefreshCcw, Tv } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -338,6 +338,32 @@ export default function App() {
 
       if (newFailures >= MAX_UNWORDLE_FAILURES) {
         // Too many failures on this row — game over
+        // Auto-fill remaining rows to show a valid solution
+        let currentForbidden = gameMode === 'unwordle-hard'
+          ? getDeadLetters(unwordleFilledRows, puzzle.targetWord)
+          : new Set<string>();
+        
+        const autoFilledRows = [...unwordleFilledRows];
+        for (let i = unwordleCurrentRow; i < puzzle.colorPatterns.length; i++) {
+          const pattern = puzzle.colorPatterns[i];
+          const validWords = findValidWordsForPattern(pattern, puzzle.targetWord, wordLength, 1, currentForbidden);
+          const autoWord = validWords.length > 0 ? validWords[0] : puzzle.targetWord;
+          
+          autoFilledRows.push({
+            word: autoWord,
+            pattern: pattern,
+            isValid: true,
+            errorPositions: [],
+          });
+          
+          if (gameMode === 'unwordle-hard') {
+            currentForbidden = getDeadLetters(autoFilledRows, puzzle.targetWord);
+          }
+        }
+        
+        setUnwordleFilledRows(autoFilledRows);
+        setUnwordleCurrentRow(puzzle.colorPatterns.length);
+
         setGameState('lost');
         setCurrentStreak(0);
       } else {
@@ -581,12 +607,20 @@ export default function App() {
                     transition={{ delay: 0.4 }}
                     className="text-slate-300 mt-6 mb-6"
                   >
-                    <span className="block text-sm uppercase tracking-wider text-slate-500 mb-2">
-                      {gameMode === 'unwordle' ? 'Kata jawaban:' : 'Kata rahasia:'}
-                    </span>
-                    <span className="font-mono text-4xl font-bold text-white tracking-[0.2em] block drop-shadow-[0_0_8px_rgba(255,255,255,0.3)] bg-slate-800/80 py-3 rounded-xl border border-slate-700/80">
-                      {displayTargetWord}
-                    </span>
+                    {gameMode.startsWith('unwordle') ? (
+                      <span className="block text-sm tracking-wider text-slate-300 mb-2 italic">
+                        Grid telah diisi dengan contoh solusi valid.
+                      </span>
+                    ) : (
+                      <>
+                        <span className="block text-sm uppercase tracking-wider text-slate-500 mb-2">
+                          Kata rahasia:
+                        </span>
+                        <span className="font-mono text-4xl font-bold text-white tracking-[0.2em] block drop-shadow-[0_0_8px_rgba(255,255,255,0.3)] bg-slate-800/80 py-3 rounded-xl border border-slate-700/80">
+                          {displayTargetWord}
+                        </span>
+                      </>
+                    )}
                   </motion.div>
                 )}
                 
