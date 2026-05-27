@@ -247,7 +247,7 @@ export default function App() {
     }
     
     // Calculate points
-    updateLeaderboard(topVotedWord, isWin, false);
+    updateLeaderboard(topVotedWord, { isWordleWin: isWin });
     
     if (isWin && wordVoters[topVotedWord]) {
       setRoundWinners(wordVoters[topVotedWord]);
@@ -296,9 +296,13 @@ export default function App() {
       setFailedAttempt(null);
       setUnwordleFailures(0); // Reset failures for next row
 
-      // Calculate points (isWin = false for now, check below)
+      // Calculate points
       const isLastRow = unwordleCurrentRow >= puzzle.colorPatterns.length - 1;
-      updateLeaderboard(topVotedWord, isLastRow, true);
+      updateLeaderboard(topVotedWord, { 
+        isValidUnwordleRow: true, 
+        isUnwordleWin: isLastRow,
+        isHardMode: gameMode === 'unwordle-hard'
+      });
 
       if (isLastRow && wordVoters[topVotedWord]) {
         setRoundWinners(wordVoters[topVotedWord]);
@@ -332,7 +336,7 @@ export default function App() {
       setUnwordleFailures(newFailures);
 
       // +1 participation for all voters anyway
-      updateLeaderboard(topVotedWord, false, true);
+      updateLeaderboard(topVotedWord, {});
 
       clearVotes();
 
@@ -374,7 +378,17 @@ export default function App() {
   };
 
   // ===== LEADERBOARD UPDATE =====
-  const updateLeaderboard = (topVotedWord: string, isWin: boolean, isUnwordle: boolean) => {
+  const updateLeaderboard = (
+    topVotedWord: string, 
+    options: {
+      isWordleWin?: boolean,
+      isValidUnwordleRow?: boolean,
+      isUnwordleWin?: boolean,
+      isHardMode?: boolean
+    } = {}
+  ) => {
+    const { isWordleWin, isValidUnwordleRow, isUnwordleWin, isHardMode } = options;
+    
     setLeaderboard(prev => {
       const newLeaderboard = { ...prev };
       
@@ -395,20 +409,28 @@ export default function App() {
         });
       }
 
-      // UnWordle bonus: +10 for valid constraint match
-      if (isUnwordle && wordVoters[topVotedWord]) {
+      // UnWordle Row Bonus
+      if (isValidUnwordleRow && wordVoters[topVotedWord]) {
+        const bonus = isHardMode ? 20 : 10;
         wordVoters[topVotedWord].forEach(voter => {
-          newLeaderboard[voter.uniqueId].score += 10;
+          newLeaderboard[voter.uniqueId].score += bonus;
         });
+        
+        // Fastest guesser for UnWordle row
+        if (firstGuessers[topVotedWord]) {
+          const fastest = firstGuessers[topVotedWord];
+          newLeaderboard[fastest.uniqueId].score += 15;
+        }
       }
 
-      // +50 for win and +25 for fastest guesser
-      if (isWin && wordVoters[topVotedWord]) {
+      // Game Win Bonus (+50)
+      if ((isWordleWin || isUnwordleWin) && wordVoters[topVotedWord]) {
         wordVoters[topVotedWord].forEach(voter => {
           newLeaderboard[voter.uniqueId].score += 50;
         });
         
-        if (firstGuessers[topVotedWord]) {
+        // Fastest guesser for Wordle Win
+        if (isWordleWin && firstGuessers[topVotedWord]) {
           const fastest = firstGuessers[topVotedWord];
           newLeaderboard[fastest.uniqueId].score += 25;
         }
@@ -637,7 +659,7 @@ export default function App() {
                         : 'Kalian menebak dengan benar!'}
                     </p>
                     <p className="text-amber-400 font-bold mb-3">
-                      +{gameMode === 'unwordle' ? '66' : '56'} PTS <span className="text-slate-300 font-normal">untuk pemilih kata ini:</span>
+                      +{gameMode === 'unwordle-hard' ? '76' : gameMode === 'unwordle' ? '66' : '56'} PTS <span className="text-slate-300 font-normal">untuk pemilih kata ini:</span>
                     </p>
                     
                     {/* List Pemenang Ronde */}
@@ -672,7 +694,7 @@ export default function App() {
                         <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-emerald-400/10 to-transparent opacity-0 animate-[shimmer_2s_infinite]" />
                         
                         <span className="text-[10px] uppercase tracking-widest text-emerald-400 mb-3 font-bold">
-                          {gameMode === 'unwordle' ? 'Pemecah Tercepat' : 'Penebak Tercepat'} <span className="text-amber-400 ml-1">+25 PTS</span>
+                          {gameMode.startsWith('unwordle') ? 'Pemecah Tercepat' : 'Penebak Tercepat'} <span className="text-amber-400 ml-1">+{gameMode.startsWith('unwordle') ? '15' : '25'} PTS</span>
                         </span>
                         <div className="flex items-center gap-4 z-10">
                           {fastestGuesser.profilePictureUrl ? (
