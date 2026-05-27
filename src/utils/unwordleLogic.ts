@@ -154,7 +154,7 @@ export function getDeadLetters(filledRows: UnwordleRow[], targetWord: string): S
   for (const row of filledRows) {
     const pattern = evaluateGuess(row.word, targetWord);
     for (let i = 0; i < row.word.length; i++) {
-      if (pattern[i] === 'absent') {
+      if (pattern[i] === 'absent' && !targetWord.includes(row.word[i])) {
         deadLetters.add(row.word[i]);
       }
     }
