@@ -365,8 +365,11 @@ export default function App() {
           }
         }
         
-        setUnwordleFilledRows(autoFilledRows);
-        setUnwordleCurrentRow(puzzle.colorPatterns.length);
+        // Delay auto-fill so users can see their failed guess before it gets replaced
+        setTimeout(() => {
+          setUnwordleFilledRows(autoFilledRows);
+          setUnwordleCurrentRow(puzzle.colorPatterns.length);
+        }, 1500);
 
         setGameState('lost');
         setCurrentStreak(0);
