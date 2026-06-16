@@ -1,10 +1,24 @@
 import { ColorState } from '../types';
 import wordlistData from '../data/wordlist.json';
+import kamusText from '../data/kamus.txt?raw';
+
+// Cache for performance
+const validWordsCache: Record<number, string[]> = {};
+const validWordsSetCache: Record<number, Set<string>> = {};
+
+// Parse kamus.txt once into an array of words
+const kamusWords = kamusText.split(/\r?\n/).map(w => w.trim().toUpperCase()).filter(w => w.length > 0);
 
 // Get the array of words by length
 export function getValidWords(length: number): string[] {
-  const data = (wordlistData as Record<string, any>)[length.toString()];
-  return data ? data.words.map((w: string) => w.toUpperCase()) : [];
+  if (!validWordsCache[length]) {
+    const data = (wordlistData as Record<string, any>)[length.toString()];
+    const baseWords = data ? data.words.map((w: string) => w.toUpperCase()) : [];
+    const extraWords = kamusWords.filter(w => w.length === length);
+    // Combine and deduplicate
+    validWordsCache[length] = Array.from(new Set([...baseWords, ...extraWords]));
+  }
+  return validWordsCache[length];
 }
 
 // Get the array of common words by length for the target word
@@ -21,8 +35,10 @@ export function getRandomWord(length: number): string {
 }
 
 export function isValidWord(word: string, length: number): boolean {
-  const validWords = getValidWords(length);
-  return validWords.includes(word.toUpperCase());
+  if (!validWordsSetCache[length]) {
+    validWordsSetCache[length] = new Set(getValidWords(length));
+  }
+  return validWordsSetCache[length].has(word.toUpperCase());
 }
 
 export function evaluateGuess(guess: string, target: string): ColorState[] {

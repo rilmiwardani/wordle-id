@@ -6,13 +6,17 @@ import { useTikTokLive } from './hooks/useTikTokLive';
 import { Leaderboard } from './components/Leaderboard';
 import { Guess, Guesser, PlayerScore, GameMode, UnwordlePuzzle, UnwordleRow } from './types';
 import { getRandomWord, evaluateGuess } from './utils/gameLogic';
-import { generatePuzzle, validateWordAgainstPattern, getDeadLetters, findValidWordsForPattern } from './utils/unwordleLogic';
+import { generatePuzzle, validateWordAgainstPattern, getDeadLetters, findValidWordsForPattern, countValidWordsForPattern } from './utils/unwordleLogic';
+import { generateAutoWordle } from './utils/wordleAutoLogic';
+import { getRemainingDontWordleWords, isStrictHardModeValid } from './utils/dontWordleLogic';
 import { RefreshCcw, Tv } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const VOTING_TIME = 30;
 const AVAILABLE_LENGTHS = [4, 5, 6, 7, 8, 9];
 const MAX_UNWORDLE_FAILURES = 3; // max failed attempts per row before game over
+const MAX_DONT_WORDLE_GUESSES = 5;
+const MAX_DONT_WORDLE_UNDOS = 3;
 
 export default function App() {
   // ===== SHARED STATE =====
@@ -38,8 +42,12 @@ export default function App() {
   const [unwordleFailures, setUnwordleFailures] = useState<number>(0);
   const [failedAttempt, setFailedAttempt] = useState<{ word: string; errorPositions: number[] } | null>(null);
 
+  // ===== DONT WORDLE STATE =====
+  const [dontWordleUndos, setDontWordleUndos] = useState<number>(MAX_DONT_WORDLE_UNDOS);
+  const remainingDontWordleWords = gameMode === 'dont-wordle' ? getRemainingDontWordleWords(wordLength, guesses) : [];
+
   // ===== LEADERBOARD =====
-  const leaderboardKey = gameMode === 'wordle' ? 'wordleLeaderboard' : (gameMode === 'unwordle' ? 'unwordleLeaderboard' : 'unwordleHardLeaderboard');
+  const leaderboardKey = gameMode === 'wordle' ? 'wordleLeaderboard' : (gameMode === 'unwordle' ? 'unwordleLeaderboard' : (gameMode === 'wordle-auto' ? 'wordleAutoLeaderboard' : (gameMode === 'dont-wordle' ? 'dontWordleLeaderboard' : 'unwordleHardLeaderboard')));
   const [leaderboard, setLeaderboard] = useState<Record<string, PlayerScore>>(() => {
     const saved = localStorage.getItem(leaderboardKey);
     return saved ? JSON.parse(saved) : {};
@@ -56,8 +64,8 @@ export default function App() {
   }, [leaderboard, leaderboardKey]);
 
   // ===== STREAKS =====
-  const streakCurrentKey = gameMode === 'wordle' ? 'wordleCurrentStreak' : (gameMode === 'unwordle' ? 'unwordleCurrentStreak' : 'unwordleHardCurrentStreak');
-  const streakBestKey = gameMode === 'wordle' ? 'wordleBestStreak' : (gameMode === 'unwordle' ? 'unwordleBestStreak' : 'unwordleHardBestStreak');
+  const streakCurrentKey = gameMode === 'wordle' ? 'wordleCurrentStreak' : (gameMode === 'unwordle' ? 'unwordleCurrentStreak' : (gameMode === 'wordle-auto' ? 'wordleAutoCurrentStreak' : (gameMode === 'dont-wordle' ? 'dontWordleCurrentStreak' : 'unwordleHardCurrentStreak')));
+  const streakBestKey = gameMode === 'wordle' ? 'wordleBestStreak' : (gameMode === 'unwordle' ? 'unwordleBestStreak' : (gameMode === 'wordle-auto' ? 'wordleAutoBestStreak' : (gameMode === 'dont-wordle' ? 'dontWordleBestStreak' : 'unwordleHardBestStreak')));
   
   const [currentStreak, setCurrentStreak] = useState<number>(() => {
     const saved = localStorage.getItem(streakCurrentKey);
@@ -140,9 +148,41 @@ export default function App() {
     clearVotes();
   };
 
+  const initWordleAutoGame = (forceLength?: number) => {
+    const activeLength = forceLength || wordLength;
+    const autoPuzzle = generateAutoWordle(activeLength, 4); // 4 rows
+    setTargetWord(autoPuzzle.targetWord);
+    setGuesses(autoPuzzle.prefilledGuesses);
+    setCurrentRow(autoPuzzle.prefilledGuesses.length);
+    setTimeLeft(VOTING_TIME);
+    setGameState('playing');
+    setFastestGuesser(null);
+    setShowOverlay(false);
+    setShowLeaderboard(false);
+    clearVotes();
+  };
+
+  const initDontWordleGame = (forceLength?: number) => {
+    const activeLength = forceLength || wordLength;
+    setTargetWord(getRandomWord(activeLength));
+    setGuesses([]);
+    setCurrentRow(0);
+    setDontWordleUndos(MAX_DONT_WORDLE_UNDOS);
+    setTimeLeft(VOTING_TIME);
+    setGameState('playing');
+    setFastestGuesser(null);
+    setShowOverlay(false);
+    setShowLeaderboard(false);
+    clearVotes();
+  };
+
   const initGame = (prevWinningWord?: string, forceLength?: number) => {
     if (gameMode === 'wordle') {
       initWordleGame(prevWinningWord, forceLength);
+    } else if (gameMode === 'wordle-auto') {
+      initWordleAutoGame(forceLength);
+    } else if (gameMode === 'dont-wordle') {
+      initDontWordleGame(forceLength);
     } else {
       initUnwordleGame(forceLength);
     }
@@ -181,6 +221,10 @@ export default function App() {
       const timerRestart = window.setTimeout(() => {
         if (gameMode === 'wordle') {
           initWordleGame(guesses[guesses.length - 1]?.word);
+        } else if (gameMode === 'wordle-auto') {
+          initWordleAutoGame();
+        } else if (gameMode === 'dont-wordle') {
+          initDontWordleGame();
         } else {
           initUnwordleGame();
         }
@@ -221,11 +265,60 @@ export default function App() {
     }
   }, [failedAttempt]);
 
+  // ===== CHECK IMPOSSIBLE STATE (KEMUNGKINAN KATA 0) =====
+  useEffect(() => {
+    if (gameState === 'playing' && gameMode.startsWith('unwordle') && puzzle && unwordleCurrentRow < puzzle.colorPatterns.length) {
+      const currentPattern = puzzle.colorPatterns[unwordleCurrentRow];
+      const forbiddenLetters = gameMode === 'unwordle-hard' 
+        ? getDeadLetters(unwordleFilledRows, puzzle.targetWord) 
+        : new Set<string>();
+      
+      const validCount = countValidWordsForPattern(currentPattern, puzzle.targetWord, wordLength, 1, forbiddenLetters);
+      
+      if (validCount === 0) {
+        // Game is stuck! 0 possible words. Auto-fail the game.
+        let currentForbidden = forbiddenLetters;
+        const autoFilledRows = [...unwordleFilledRows];
+        
+        for (let i = unwordleCurrentRow; i < puzzle.colorPatterns.length; i++) {
+          const pattern = puzzle.colorPatterns[i];
+          const validWords = findValidWordsForPattern(pattern, puzzle.targetWord, wordLength, 1, currentForbidden);
+          const autoWord = validWords.length > 0 ? validWords[0] : puzzle.targetWord;
+          
+          autoFilledRows.push({
+            word: autoWord,
+            pattern: pattern,
+            isValid: true,
+            errorPositions: [],
+          });
+          
+          if (gameMode === 'unwordle-hard') {
+            currentForbidden = getDeadLetters(autoFilledRows, puzzle.targetWord);
+          }
+        }
+        
+        // Mark as failed visually first
+        const stuckWord = "BUNTU".padEnd(wordLength, 'X').substring(0, wordLength);
+        setFailedAttempt({ word: stuckWord, errorPositions: Array.from({length: wordLength}, (_, i) => i) });
+        
+        setTimeout(() => {
+          setUnwordleFilledRows(autoFilledRows);
+          setUnwordleCurrentRow(puzzle.colorPatterns.length);
+        }, 1500);
+
+        setGameState('lost');
+        setCurrentStreak(0);
+      }
+    }
+  }, [unwordleCurrentRow, unwordleFilledRows, gameState, gameMode, puzzle, wordLength]);
+
   // ===== ROUND END =====
   const handleRoundEnd = () => {
     const sortedVotes = Object.entries(votes).sort((a, b) => (b[1] as number) - (a[1] as number));
     
     if (sortedVotes.length === 0) {
+      // Just in case, if the possible words is 0, we shouldn't reset timer infinitely.
+      // But our useEffect above should catch it first.
       setTimeLeft(VOTING_TIME);
       return;
     }
@@ -234,8 +327,48 @@ export default function App() {
 
     if (gameMode === 'wordle') {
       handleWordleRoundEnd(topVotedWord);
+    } else if (gameMode === 'wordle-auto') {
+      handleAutoWordleRoundEnd(topVotedWord);
+    } else if (gameMode === 'dont-wordle') {
+      handleDontWordleRoundEnd(topVotedWord);
     } else {
       handleUnwordleRoundEnd(topVotedWord);
+    }
+  };
+
+  const handleAutoWordleRoundEnd = (topVotedWord: string) => {
+    const colors = evaluateGuess(topVotedWord, targetWord);
+    const newGuesses = [...guesses, { word: topVotedWord, colors }];
+    setGuesses(newGuesses);
+    
+    const isWin = topVotedWord === targetWord;
+    
+    // Calculate points using unified simple scoring
+    updateLeaderboard(topVotedWord, { isWordleWin: isWin, isLoss: !isWin, actualTargetWord: targetWord });
+    
+    if (isWin && wordVoters[topVotedWord]) {
+      setRoundWinners(wordVoters[topVotedWord]);
+      if (firstGuessers[topVotedWord]) setFastestGuesser(firstGuessers[topVotedWord]);
+    } else if (!isWin && wordVoters[targetWord]) {
+      setRoundWinners(wordVoters[targetWord]);
+      if (firstGuessers[targetWord]) setFastestGuesser(firstGuessers[targetWord]);
+    } else {
+      setRoundWinners([]);
+      setFastestGuesser(null);
+    }
+
+    clearVotes();
+    
+    if (isWin) {
+      setGameState('won');
+      setCurrentStreak(prev => {
+        const newStreak = prev + 1;
+        setBestStreak(currentBest => Math.max(currentBest, newStreak));
+        return newStreak;
+      });
+    } else {
+      setGameState('lost');
+      setCurrentStreak(0);
     }
   };
 
@@ -245,18 +378,20 @@ export default function App() {
     setGuesses(newGuesses);
     
     const isWin = topVotedWord === targetWord;
-    
-    if (isWin && firstGuessers[topVotedWord]) {
-      setFastestGuesser(firstGuessers[topVotedWord]);
-    }
+    const isLoss = !isWin && newGuesses.length >= 5;
     
     // Calculate points
-    updateLeaderboard(topVotedWord, { isWordleWin: isWin });
+    updateLeaderboard(topVotedWord, { isWordleWin: isWin, isLoss: isLoss, actualTargetWord: targetWord });
     
     if (isWin && wordVoters[topVotedWord]) {
       setRoundWinners(wordVoters[topVotedWord]);
+      if (firstGuessers[topVotedWord]) setFastestGuesser(firstGuessers[topVotedWord]);
+    } else if (isLoss && wordVoters[targetWord]) {
+      setRoundWinners(wordVoters[targetWord]);
+      if (firstGuessers[targetWord]) setFastestGuesser(firstGuessers[targetWord]);
     } else {
       setRoundWinners([]);
+      if (!isWin && !isLoss) setFastestGuesser(null);
     }
     
     clearVotes();
@@ -275,6 +410,51 @@ export default function App() {
       setCurrentRow(prev => prev + 1);
       setTimeLeft(VOTING_TIME);
     }
+  };
+
+  const handleDontWordleRoundEnd = (topVotedWord: string) => {
+    // 1. Is it the target word?
+    if (topVotedWord === targetWord) {
+      const colors = evaluateGuess(topVotedWord, targetWord);
+      setGuesses(prev => [...prev, { word: topVotedWord, colors }]);
+      setGameState('lost');
+      setCurrentStreak(0);
+      updateLeaderboard(topVotedWord, { isLoss: true, actualTargetWord: targetWord });
+      clearVotes();
+      return;
+    }
+
+    // 2. Is it a valid strict hard mode guess?
+    if (!isStrictHardModeValid(topVotedWord, guesses)) {
+      // Show failed attempt, don't use up a row
+      setFailedAttempt({ word: topVotedWord, errorPositions: Array.from({length: wordLength}, (_, i) => i) });
+      setTimeLeft(VOTING_TIME);
+      updateLeaderboard(topVotedWord, {});
+      clearVotes();
+      return;
+    }
+
+    // 3. Valid guess
+    const colors = evaluateGuess(topVotedWord, targetWord);
+    const newGuesses = [...guesses, { word: topVotedWord, colors }];
+    setGuesses(newGuesses);
+    setCurrentRow(prev => prev + 1);
+    
+    // Check win condition
+    if (newGuesses.length >= MAX_DONT_WORDLE_GUESSES) {
+      setGameState('won');
+      setCurrentStreak(prev => {
+        const newStreak = prev + 1;
+        setBestStreak(currentBest => Math.max(currentBest, newStreak));
+        return newStreak;
+      });
+      // Reward points
+      updateLeaderboard(topVotedWord, { isWordleWin: true });
+    } else {
+      setTimeLeft(VOTING_TIME);
+      updateLeaderboard(topVotedWord, { isWordleWin: false });
+    }
+    clearVotes();
   };
 
   const handleUnwordleRoundEnd = (topVotedWord: string) => {
@@ -391,55 +571,59 @@ export default function App() {
       isWordleWin?: boolean,
       isValidUnwordleRow?: boolean,
       isUnwordleWin?: boolean,
-      isHardMode?: boolean
+      isHardMode?: boolean,
+      isLoss?: boolean,
+      actualTargetWord?: string
     } = {}
   ) => {
-    const { isWordleWin, isValidUnwordleRow, isUnwordleWin, isHardMode } = options;
+    const { isWordleWin, isValidUnwordleRow, isUnwordleWin, isLoss, actualTargetWord } = options;
     
     setLeaderboard(prev => {
       const newLeaderboard = { ...prev };
       
-      // +1 for participation
-      (Object.entries(wordVoters) as [string, Guesser[]][]).forEach(([word, voters]) => {
-        voters.forEach((voter: Guesser) => {
-          if (!newLeaderboard[voter.uniqueId]) {
-            newLeaderboard[voter.uniqueId] = { ...voter, score: 0 };
-          }
-          newLeaderboard[voter.uniqueId].score += 1;
-        });
-      });
-
-      // +5 for majority
-      if (wordVoters[topVotedWord]) {
-        wordVoters[topVotedWord].forEach(voter => {
-          newLeaderboard[voter.uniqueId].score += 5;
-        });
-      }
-
-      // UnWordle Row Bonus
-      if (isValidUnwordleRow && wordVoters[topVotedWord]) {
-        const bonus = isHardMode ? 20 : 10;
-        wordVoters[topVotedWord].forEach(voter => {
-          newLeaderboard[voter.uniqueId].score += bonus;
-        });
-        
-        // Fastest guesser for UnWordle row
-        if (firstGuessers[topVotedWord]) {
-          const fastest = firstGuessers[topVotedWord];
-          newLeaderboard[fastest.uniqueId].score += 15;
+      const ensureVoter = (voter: Guesser) => {
+        if (!newLeaderboard[voter.uniqueId]) {
+          newLeaderboard[voter.uniqueId] = { ...voter, score: 0 };
         }
+      };
+
+      // 1. Poin Tebakan Diterima (+10)
+      // Diberikan jika itu tebakan Wordle biasa (selalu diterima kecuali kalah/gameover sebelum dihitung), 
+      // ATAU tebakan Unwordle yang memenuhi syarat baris.
+      const isWordleMode = !gameMode.startsWith('unwordle');
+      if ((isWordleMode || isValidUnwordleRow) && wordVoters[topVotedWord]) {
+        wordVoters[topVotedWord].forEach(voter => {
+          ensureVoter(voter);
+          newLeaderboard[voter.uniqueId].score += 10;
+        });
       }
 
-      // Game Win Bonus (+50)
+      // 2. Poin Menang (+50) & Tercepat (+20)
       if ((isWordleWin || isUnwordleWin) && wordVoters[topVotedWord]) {
         wordVoters[topVotedWord].forEach(voter => {
+          ensureVoter(voter);
           newLeaderboard[voter.uniqueId].score += 50;
         });
         
-        // Fastest guesser for Wordle Win
-        if (isWordleWin && firstGuessers[topVotedWord]) {
+        if (firstGuessers[topVotedWord]) {
           const fastest = firstGuessers[topVotedWord];
-          newLeaderboard[fastest.uniqueId].score += 25;
+          ensureVoter(fastest);
+          newLeaderboard[fastest.uniqueId].score += 20;
+        }
+      }
+
+      // 3. Poin Penghibur Saat Kalah (+50 & +20)
+      // Diberikan untuk yang diam-diam menebak jawaban benar meskipun vote terbanyak salah.
+      if (isLoss && actualTargetWord && wordVoters[actualTargetWord]) {
+        wordVoters[actualTargetWord].forEach(voter => {
+          ensureVoter(voter);
+          newLeaderboard[voter.uniqueId].score += 50;
+        });
+        
+        if (firstGuessers[actualTargetWord]) {
+          const fastest = firstGuessers[actualTargetWord];
+          ensureVoter(fastest);
+          newLeaderboard[fastest.uniqueId].score += 20;
         }
       }
 
@@ -450,6 +634,8 @@ export default function App() {
   const restartGame = () => {
     if (gameMode === 'wordle') {
       initWordleGame(gameState === 'won' ? guesses[guesses.length - 1].word : undefined);
+    } else if (gameMode === 'wordle-auto') {
+      initWordleAutoGame();
     } else {
       initUnwordleGame();
     }
@@ -467,13 +653,22 @@ export default function App() {
       console.log('Fullscreen API not supported or blocked');
     }
 
-    if (gameMode === 'wordle') setGameMode('unwordle');
+    if (gameMode === 'wordle') setGameMode('wordle-auto');
+    else if (gameMode === 'wordle-auto') setGameMode('unwordle');
     else if (gameMode === 'unwordle') setGameMode('unwordle-hard');
+    else if (gameMode === 'unwordle-hard') setGameMode('dont-wordle');
     else setGameMode('wordle');
   };
 
+  const handleUndo = () => {
+    if (gameMode !== 'dont-wordle' || gameState !== 'playing' || guesses.length === 0 || dontWordleUndos <= 0) return;
+    setDontWordleUndos(prev => prev - 1);
+    setGuesses(prev => prev.slice(0, -1));
+    setCurrentRow(prev => prev - 1);
+  };
+
   // Determine what target word to show on loss
-  const displayTargetWord = gameMode === 'wordle' ? targetWord : (puzzle?.targetWord || '');
+  const displayTargetWord = (gameMode === 'wordle' || gameMode === 'wordle-auto' || gameMode === 'dont-wordle') ? targetWord : (puzzle?.targetWord || '');
 
   return (
     <div className="wordle-container">
@@ -482,14 +677,16 @@ export default function App() {
       <div className="flex flex-col items-center justify-center mb-3 w-full text-center">
         <h1 
           onClick={handleModeChange}
-          className={`text-3xl sm:text-4xl font-black tracking-widest mb-1 cursor-pointer hover:opacity-80 transition-opacity select-none ${gameMode === 'unwordle-hard' ? 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'text-white'}`}
+          className={`text-3xl sm:text-4xl font-black tracking-widest mb-1 cursor-pointer hover:opacity-80 transition-opacity select-none ${gameMode === 'unwordle-hard' ? 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]' : gameMode === 'dont-wordle' ? 'text-amber-500 drop-shadow-[0_0_15px_rgba(245,158,11,0.5)]' : 'text-white'}`}
           title={
-            gameMode === 'wordle' ? 'Klik untuk ganti ke UnWordle' :
+            gameMode === 'wordle' ? 'Klik untuk ganti ke Mode Auto' :
+            gameMode === 'wordle-auto' ? 'Klik untuk ganti ke UnWordle' :
             gameMode === 'unwordle' ? 'Klik untuk ganti ke UnWordle (Hard)' :
+            gameMode === 'unwordle-hard' ? 'Klik untuk ganti ke Don\'t Wordle' :
             'Klik untuk ganti ke Wordle'
           }
         >
-          {gameMode === 'wordle' ? 'WORDLE.ID' : 'UNWORDLE.ID'}
+          {gameMode === 'wordle' ? 'WORDLE.ID' : gameMode === 'wordle-auto' ? 'MODE AUTO' : gameMode === 'dont-wordle' ? 'DON\'T WORDLE' : 'UNWORDLE.ID'}
         </h1>
         <div className="flex items-center justify-center gap-3 mt-1 w-full flex-wrap">
 
@@ -559,9 +756,25 @@ export default function App() {
               </span>
             </div>
           )}
+          {gameMode === 'dont-wordle' && (
+            <div className="flex bg-slate-800/50 rounded-full px-4 py-1.5 border border-slate-700/50 shadow-inner items-center gap-2">
+              <span className="text-[10px] uppercase tracking-widest text-slate-400">UNDOS</span>
+              <span className={`text-sm font-black ${dontWordleUndos > 0 ? 'text-amber-400' : 'text-red-500'}`}>{dontWordleUndos}</span>
+              {dontWordleUndos > 0 && guesses.length > 0 && gameState === 'playing' && (
+                <button onClick={handleUndo} className="ml-2 bg-blue-500 hover:bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded font-bold transition-colors shadow-md">UNDO</button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Minimalist Time Bar */}
+        {gameMode === 'dont-wordle' && gameState === 'playing' && (
+          <div className="w-full max-w-md mx-auto mb-1 flex flex-col items-center">
+            <span className="text-xs uppercase font-black text-amber-300 drop-shadow-md">
+              {remainingDontWordleWords.length} KATA TERSISA
+            </span>
+          </div>
+        )}
         <div className="w-full max-w-md mx-auto mb-3">
           <div className="flex justify-between items-end mb-2">
             <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold">Waktu Voting</span>
@@ -582,8 +795,8 @@ export default function App() {
         </div>
 
         {/* Grid — conditional on mode */}
-        {gameMode === 'wordle' ? (
-          <Grid guesses={guesses} currentRow={currentRow} wordLength={wordLength} />
+        {gameMode === 'wordle' || gameMode === 'wordle-auto' || gameMode === 'dont-wordle' ? (
+          <Grid guesses={guesses} currentRow={currentRow} wordLength={wordLength} rowCount={gameMode === 'dont-wordle' ? MAX_DONT_WORDLE_GUESSES : 5} />
         ) : (
           puzzle && (
             <UnwordleGrid
@@ -625,8 +838,8 @@ export default function App() {
                   className={`text-xl sm:text-2xl md:text-3xl font-extrabold mb-2 uppercase tracking-normal sm:tracking-wide whitespace-nowrap ${gameState === 'won' ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.4)]' : 'text-red-400 drop-shadow-[0_0_15px_rgba(248,113,113,0.4)]'}`}
                 >
                   {gameState === 'won' 
-                    ? (gameMode === 'unwordle' ? 'PUZZLE TERPECAHKAN!' : 'BERHASIL MENEBAK!') 
-                    : (gameMode === 'unwordle' ? 'GAGAL MEMECAHKAN' : 'GAGAL MENEBAK')}
+                    ? (gameMode.startsWith('unwordle') ? 'PUZZLE TERPECAHKAN!' : gameMode === 'dont-wordle' ? 'SELAMAT BERTAHAN!' : 'BERHASIL MENEBAK!') 
+                    : (gameMode.startsWith('unwordle') ? 'GAGAL MEMECAHKAN' : gameMode === 'dont-wordle' ? 'TERTEBAK KATA RAHASIA!' : 'GAGAL MENEBAK')}
                 </motion.h2>
                 
                 {gameState === 'lost' && (
@@ -653,7 +866,7 @@ export default function App() {
                   </motion.div>
                 )}
                 
-                {gameState === 'won' && (
+                {(gameState === 'won' || (gameState === 'lost' && (gameMode === 'wordle-auto' || gameMode === 'wordle') && roundWinners.length > 0)) && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -661,32 +874,38 @@ export default function App() {
                     className="text-slate-300 mt-4 mb-4 text-sm"
                   >
                     <p className="mb-2">
-                      {gameMode === 'unwordle' 
-                        ? 'Semua pola berhasil dipecahkan!' 
-                        : 'Kalian menebak dengan benar!'}
+                      {gameState === 'won' 
+                        ? (gameMode.startsWith('unwordle') ? 'Semua pola berhasil dipecahkan!' : gameMode === 'dont-wordle' ? 'Kalian bertahan dari menebak kata!' : 'Kalian menebak dengan benar!') 
+                        : (gameMode === 'dont-wordle' ? 'Kalian malah menebak kata targetnya!' : 'Sayang sekali vote terbanyak salah!')}
                     </p>
                     <p className="text-amber-400 font-bold mb-3">
-                      +{gameMode === 'unwordle-hard' ? '76' : gameMode === 'unwordle' ? '66' : '56'} PTS <span className="text-slate-300 font-normal">untuk pemilih kata ini:</span>
+                      +{(gameState === 'won' ? '60' : '50')} PTS <span className="text-slate-300 font-normal">untuk {gameState === 'won' ? 'pemilih kata ini:' : 'yang menjawab benar:'}</span>
                     </p>
                     
                     {/* List Pemenang Ronde */}
                     {roundWinners.length > 0 && (
-                      <div className="flex flex-wrap justify-center gap-2 mb-4">
-                        {roundWinners.slice(0, 10).map(winner => (
-                          <div key={winner.uniqueId} className="flex flex-col items-center w-10">
-                            {winner.profilePictureUrl ? (
-                              <img src={winner.profilePictureUrl} className="w-8 h-8 rounded-full border border-amber-400" />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold border border-amber-400 text-white">{winner.nickname.charAt(0)}</div>
-                            )}
-                            <span className="text-[8px] truncate w-full text-center mt-1 text-slate-400">{winner.nickname.substring(0, 8)}</span>
-                          </div>
-                        ))}
-                        {roundWinners.length > 10 && (
-                          <div className="flex flex-col items-center justify-center w-10">
-                            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-300 border border-slate-600">+{roundWinners.length - 10}</div>
-                          </div>
-                        )}
+                      <div className="flex flex-col items-center mb-5">
+                        <div className="flex justify-center -space-x-3 rtl:space-x-reverse">
+                          {roundWinners.slice(0, 10).map((winner, index) => (
+                            <div key={winner.uniqueId} className="relative hover:z-20 transition-transform hover:scale-110" style={{ zIndex: 10 - index }}>
+                              {winner.profilePictureUrl ? (
+                                <img src={winner.profilePictureUrl} className="w-8 h-8 rounded-full border-2 border-slate-900 shadow-sm" alt={winner.nickname} title={winner.nickname} />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold border-2 border-slate-900 shadow-sm text-white" title={winner.nickname}>
+                                  {winner.nickname.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          {roundWinners.length > 10 && (
+                            <div className="relative z-0">
+                              <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-300 border-2 border-slate-900 shadow-sm">
+                                +{roundWinners.length - 10}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 mt-2">{roundWinners.length} penyumbang jawaban</span>
                       </div>
                     )}
                     

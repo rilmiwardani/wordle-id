@@ -1,6 +1,6 @@
 export type ColorState = 'correct' | 'present' | 'absent' | 'empty';
 
-export type GameMode = 'wordle' | 'unwordle' | 'unwordle-hard';
+export type GameMode = 'wordle' | 'unwordle' | 'unwordle-hard' | 'wordle-auto' | 'dont-wordle';
 
 export interface Guess {
   word: string;

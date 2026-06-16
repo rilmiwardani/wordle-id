@@ -17,13 +17,13 @@ export function useTikTokLive({ isActive, wordLength, unwordlePattern, unwordleT
   const [votes, setVotes] = useState<VoteData>({});
   const [firstGuessers, setFirstGuessers] = useState<FirstGuessers>({});
   const [wordVoters, setWordVoters] = useState<WordVoters>({});
-  // Track users who have voted in the current round to prevent duplicate votes
-  const [votedUsers, setVotedUsers] = useState<Set<string>>(new Set());
+  // Track users' current vote to allow changing votes
+  const [userVotes, setUserVotes] = useState<Record<string, string>>({});
   const [isConnected, setIsConnected] = useState(false);
 
   const isActiveRef = useRef(isActive);
   const wordLengthRef = useRef(wordLength);
-  const votedUsersRef = useRef(votedUsers);
+  const userVotesRef = useRef(userVotes);
   const unwordlePatternRef = useRef(unwordlePattern);
   const unwordleTargetRef = useRef(unwordleTarget);
   const unwordleForbiddenLettersRef = useRef(unwordleForbiddenLetters);
@@ -31,37 +31,49 @@ export function useTikTokLive({ isActive, wordLength, unwordlePattern, unwordleT
   useEffect(() => {
     isActiveRef.current = isActive;
     wordLengthRef.current = wordLength;
-    votedUsersRef.current = votedUsers;
+    userVotesRef.current = userVotes;
     unwordlePatternRef.current = unwordlePattern;
     unwordleTargetRef.current = unwordleTarget;
     unwordleForbiddenLettersRef.current = unwordleForbiddenLetters;
-  }, [isActive, wordLength, votedUsers, unwordlePattern, unwordleTarget, unwordleForbiddenLetters]);
+  }, [isActive, wordLength, userVotes, unwordlePattern, unwordleTarget, unwordleForbiddenLetters]);
 
   const handleIncomingComment = useCallback((comment: string, guesser?: Guesser) => {
     // Sanitize: remove non-alphabetic characters to bypass filters (e.g. B A C O K -> BACOK)
     const guessedWord = comment.replace(/[^a-zA-Z]/g, '').toUpperCase();
     const currentLength = wordLengthRef.current;
     
-    // Check if user has already voted in this round
-    if (guesser && votedUsersRef.current.has(guesser.uniqueId)) {
-      return; // Ignore vote if user already voted
+    // Check if user already voted for exactly this word
+    if (guesser && userVotesRef.current[guesser.uniqueId] === guessedWord) {
+      return; // Ignore if it's the same vote
     }
     
     // Validation: word must be valid length and exist in wordlist
     // (Constraint checking for UnWordle happens at round-end in the game hook)
     if (guessedWord.length === currentLength && isValidWord(guessedWord, currentLength)) {
-      setVotes(prev => ({
-        ...prev,
-        [guessedWord]: (prev[guessedWord] || 0) + 1
-      }));
+      setVotes(prev => {
+        const newVotes = { ...prev };
+        
+        // If user voted previously for a different word, decrement it
+        if (guesser && userVotesRef.current[guesser.uniqueId]) {
+          const oldWord = userVotesRef.current[guesser.uniqueId];
+          if (newVotes[oldWord]) {
+            newVotes[oldWord]--;
+            if (newVotes[oldWord] <= 0) {
+              delete newVotes[oldWord];
+            }
+          }
+        }
+        
+        newVotes[guessedWord] = (newVotes[guessedWord] || 0) + 1;
+        return newVotes;
+      });
       
       if (guesser) {
-        // Record that this user has voted
-        setVotedUsers(prev => {
-          const newSet = new Set(prev);
-          newSet.add(guesser.uniqueId);
-          return newSet;
-        });
+        // Record that this user has voted for this word
+        setUserVotes(prev => ({
+          ...prev,
+          [guesser.uniqueId]: guessedWord
+        }));
         
         setFirstGuessers(prev => {
           if (!prev[guessedWord]) {
@@ -73,10 +85,21 @@ export function useTikTokLive({ isActive, wordLength, unwordlePattern, unwordleT
           return prev;
         });
         
-        setWordVoters(prev => ({
-          ...prev,
-          [guessedWord]: [...(prev[guessedWord] || []), guesser]
-        }));
+        setWordVoters(prev => {
+          const newWordVoters = { ...prev };
+          
+          // Remove from old word
+          if (userVotesRef.current[guesser.uniqueId]) {
+            const oldWord = userVotesRef.current[guesser.uniqueId];
+            if (newWordVoters[oldWord]) {
+              newWordVoters[oldWord] = newWordVoters[oldWord].filter(g => g.uniqueId !== guesser.uniqueId);
+            }
+          }
+          
+          // Add to new word
+          newWordVoters[guessedWord] = [...(newWordVoters[guessedWord] || []), guesser];
+          return newWordVoters;
+        });
       }
     }
   }, []);
@@ -188,7 +211,7 @@ export function useTikTokLive({ isActive, wordLength, unwordlePattern, unwordleT
     setVotes({});
     setFirstGuessers({});
     setWordVoters({});
-    setVotedUsers(new Set()); // Reset voted users for the new round
+    setUserVotes({}); // Reset user votes for the new round
   }, []);
 
   return { votes, firstGuessers, wordVoters, handleIncomingComment, clearVotes, isConnected };

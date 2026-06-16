@@ -6,10 +6,11 @@ interface GridProps {
   guesses: Guess[];
   currentRow: number;
   wordLength: number;
+  rowCount?: number;
 }
 
-export function Grid({ guesses, currentRow, wordLength }: GridProps) {
-  const rows = Array.from({ length: 5 });
+export function Grid({ guesses, currentRow, wordLength, rowCount = 5 }: GridProps) {
+  const rows = Array.from({ length: rowCount });
 
   return (
     <motion.div 
